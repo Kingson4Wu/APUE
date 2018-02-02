@@ -1,0 +1,6 @@
+.idea/
+.DS_Store
+apue.3e/**
+cmake-build-debug/**
+
+

@@ -1,6 +1,9 @@
 #include "apue.h"
 #include <sys/wait.h>
 
+
+//gcc shell1.c ../lib/error.c -o shell1
+
 int
 main(void)
 {
@@ -20,6 +23,7 @@ main(void)
 			err_ret("couldn't execute: %s", buf);
 			exit(127);
 		}
+		//printf("%d\n", pid);
 
 		/* parent */
 		if ((pid = waitpid(pid, &status, 0)) < 0)
