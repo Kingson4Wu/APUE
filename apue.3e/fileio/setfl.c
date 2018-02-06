@@ -11,6 +11,8 @@ set_fl(int fd, int flags) /* flags are file status flags to turn on */
 
 	val |= flags;		/* turn on flags */
 
+	//val &= ~flags; 		/* turn flags off */
+
 	if (fcntl(fd, F_SETFL, val) < 0)
 		err_sys("fcntl F_SETFL error");
 }
