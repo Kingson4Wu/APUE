@@ -15,3 +15,10 @@ main(int argc, char *argv[])
 
 	exit(0);
 }
+
+//gcc ../lib/error.c ../lib/prexit.c systest3.c -o tsys
+//./tsys ./pruids
+//sudo chown root tsys
+//sudo chmod u+s tsys
+//ll tsys
+//mac os 不生效。。。

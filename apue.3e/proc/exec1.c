@@ -11,7 +11,8 @@ main(void)
 	if ((pid = fork()) < 0) {
 		err_sys("fork error");
 	} else if (pid == 0) {	/* specify pathname, specify environment */
-		if (execle("/home/sar/bin/echoall", "echoall", "myarg1",
+		//./echoall echoall myarg1 MY\ ARG2
+		if (execle("/Users/kingsonwu/Personal/C-source-code/APUE/apue.3e/proc/echoall", "echoall", "myarg1",
 				"MY ARG2", (char *)0, env_init) < 0)
 			err_sys("execle error");
 	}

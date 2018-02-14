@@ -24,6 +24,9 @@ charatatime(char *str)
 	int		c;
 
 	setbuf(stdout, NULL);			/* set unbuffered */
-	for (ptr = str; (c = *ptr++) != 0; )
+	for (ptr = str; (c = *ptr++) != 0; ){
+		//sleep(1);
 		putc(c, stdout);
+	}
+//gcc tellwait1.c ../lib/error.c -o tellwait1
 }
