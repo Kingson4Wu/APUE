@@ -39,7 +39,7 @@ shell是一个特殊的应用程序，为运行其他程序提供一个接口。
     - `./mycat < kxw.txt > kxw_copy.txt`
 + 1-5 intro/getcputc.c (stdio.h)(标准IO)
 + 1-6 intro/hello.c  (unistd.h)(程序和进程)
-+ 1-7 intro/shell1.c （进程控制） (TODO 为什么fork返回两次)
++ 1-7 intro/shell1.c （进程控制） (为什么fork返回两次：进程副本，看下面其他笔记的解释)
     - 新进程是调用进程的一个副本
     - 文件结束符（CRTL ＋ D）
 + 1-8 intro/testerror.c (出错处理)（strerror, perror）
@@ -184,7 +184,17 @@ shell是一个特殊的应用程序，为运行其他程序提供一个接口。
     - 但是用户可以设置多个组ID作为其附属组ID
     - 用户不仅可以属于口令文件记录项中组ID所对应的组，也可以属于多至16个另外的组。
     - 文件访问权限检查为：不仅将进程的有效组ID与文件的组ID项比较，而且也将所有附属组ID与文件的组ID进行比较。！！！
-    - 如何为用户设置附属组ID ： TODO
+    - 如何为用户设置附属组ID
+        - <http://blog.163.com/chujb_chen/blog/static/105711120160270337976/>
+        - 从用户的角度，分为主组和附属组。
+          主组：也被称为primary group、first group或initial login group，用户的默认组，用户的gid所标识的组。
+          附属组：也被称为Secondary group或supplementary group，用户的附加组。
+        - 通过id命令可查看当前用户的主组和附属组: gid标识主组，groups表示用户所属的全部组（主组和附属组）
+        - 当通过useradd命令创建新用户时，可以通过-g参数指定已存在的某个组为其主组，若没有使用-g参数，
+          则系统自动创建名称和用户名相同的组作为该用户的主组
+        - 通过usermod -G 设置普通用户的附属组。-g后面的组是用户的主组，-G后面的组是用户的附加组  
+         
+
 + Linux 和Solaris支持阴影口令文件。FreeBSD和Mac OS X 则以不同方式存储加密口令字。
 + 主机 /etc/hosts (netdb.h)
 + 记录各网络服务器所提供服务的数据文件/etc/services(netdb.h)
@@ -337,10 +347,45 @@ init时所有孤儿进程的父进程！！！
     - 默认值NZERO（mac os  20）
     - 进程可以通过nice函数调整
     - 子进程从父进程中继承nice值。
-    + nice 值对于java线程？？TODO
+    + nice 值对于java线程？？
+        - 线程总是存在优先级，优先级范围在1~10之间。JVM线程调度程序是基于优先级的抢先调度机制。在大多数情况下，当前运行的线程优先级将大于或等于线程池中任何线程的优先级。但这仅仅是大多数情况。
+        - 注意：当设计多线程应用程序的时候，一定不要依赖于线程的优先级。因为线程调度优先级操作是没有保障的，只能把线程优先级作用作为一种提高程序效率的方法，但是要保证程序不依赖这种操作。
+        - 当线程池中线程都具有相同的优先级，调度程序的JVM实现自由选择它喜欢的线程。这时候调度程序的操作有两种可能：一是选择一个线程运行，直到它阻塞或者运行完成为止。二是时间分片，为池内的每个线程提供均等的运行机会。
+        - 设置线程的优先级：线程默认的优先级是创建它的执行线程的优先级。可以通过setPriority(int newPriority)更改线程的优先级。
+        - java线程优先级实现原理(搜不到结果。。。)
+        - nice值是 进程优先级，跟线程没关系。。。。。！！！！
 + 进程时间（3个度量时间）：通过调用times函数获得自身及已终止子进程的值。
 
-+ java 创建子进程的原理 TODO
++ java 创建子进程的原理 
+    - proc/fork3.c, 子进程没有继承父进程的定时任务？？!!
+    - java进程调用外部程序时fork()+exec()分析
+      <pre>
+      java进程调用一个外部程序，一般使用Runtime.getRuntime().exec(cmd)的方式启动。
+      
+      以下是Runtime.getRuntime().exec(cmd) 的执行流程分析
+      
+      分析SUN JDK 1.5 SRC，找到Runtime.getRuntime().exec(cmd)的执行流程：
+      
+      java.lang.Runtime.exec(cmd);
+      
+      --java.lang.ProcessBuilder.start();
+      
+      ----java.lang.ProcessImpl.start();
+      
+      ------Java_java_lang_UNIXProcess_forkAndExec() in j2se/src/solaris/native/java/lang/UNIXProcess_md.c
+      
+      --------1). fork(); 2). execvp();
+      
+      man fork知道，fork产生的子进程需要复制父进程在内存中的所有数据内容（代码段、数据段、堆栈段），由于全部复制开销较大，因此Linux已经采用copy-on-write机制，即只是复制页表，共享内容，在有改变的时候再去申请内存和复制数据。
+      
+      参考：
+      
+      http://my.oschina.net/jsan/blog/273672
+      </pre>
+      - 可以单独运行一个Java程序，称为JavaB吧，由它负责调用外部程序，JavaA调用我们封装后的接口与之通信，等待外部程序结束，从而与 Runtime.getRuntime().exec(cmd) 的语义保持一致。这个单独运行的JavaB只需要很小很小的内存，因此不太可能出现无法分配内存，进而无法执行外部程序的问题了。
+      
+      
+    
 
 
 ### 9.进程关系
@@ -492,7 +537,10 @@ init时所有孤儿进程的父进程！！！
 + <sys/socket.h>
 + TCP/IP协议栈使用大端字节序。
 + <arpa/inet.h>  htonl函数。h表示"主机"字节序，n表示"网络"字节序，l表示"长"整数（4字节），s表示"短"整数（2字节）。
-+ /etc/services TODO
++ /etc/services 
+    - /etc/services文件是记录网络服务名和它们对应使用的端口号及协议。文件中的每一行对应一种服务，它由4个字段组成，中间用TAB或空格分隔，分别表示“服务名称”、“使用端口”、“协议名称”以及“别名”。
+    - /etc/services文件包含了服务名和端口号之间的映射，很多的系统程序要使用这个文件。一般情况下，不要修改该文件的内容，因为这些设置都是Internet标准的设置。一旦修改，可能会造成系统冲突，使用户无法正常访问资源。
+    - <http://blog.chinaunix.net/uid-30414403-id-5190762.html>
 + 带外数据（紧急数据）TCP。
 + 没仔细看TODO
 
