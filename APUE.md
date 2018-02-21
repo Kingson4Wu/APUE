@@ -257,7 +257,7 @@ init时所有孤儿进程的父进程！！！
     - fork函数被调用一次，但返回两次。子进程返回值是0，而父进程返回是新建子进程的进程ID。
     - 没有一个函数是一个进程可以获得其所有子进程的进程ID。
     - 子进程可以通过getppid获取其父进程的进程ID。
-    - 子进程是父进程的副本。子进程获得父进程数据空间，堆和栈的副本。父进程和子进程并不共享这鞋存储空间部分。父进程和子进程共享正文段。
+    - 子进程是父进程的副本。子进程获得父进程数据空间，堆和栈的副本。父进程和子进程并不共享这些存储空间部分。父进程和子进程共享正文段。
     - 如今很多实现并不执行一个父进程数据段、堆和栈的完全副本。而使用写时复制(Copy-On-Write，COW)技术。
     这些区域由父进程和子进程共享，而内核将它们的访问权限改变为只读。 !!!
     - Linux 3.2.0 提供另一种新进程创建函数-clone系统调用。允许调用者控制哪些部分由父进程和子进程共享。
@@ -378,14 +378,70 @@ init时所有孤儿进程的父进程！！！
       
       man fork知道，fork产生的子进程需要复制父进程在内存中的所有数据内容（代码段、数据段、堆栈段），由于全部复制开销较大，因此Linux已经采用copy-on-write机制，即只是复制页表，共享内容，在有改变的时候再去申请内存和复制数据。
       
+      虽然Linux早已在fork()中采用copy-on-write机制，但是JVM调
+      用fork()后，Java进程里的其它线程往往会被调度回来继续执行，修改了自己的内存，而这个时候
+      execvp()还没有执行，于是悲剧就发生了，内存都要重新复制一遍。
+      
       参考：
       
       http://my.oschina.net/jsan/blog/273672
       </pre>
       - 可以单独运行一个Java程序，称为JavaB吧，由它负责调用外部程序，JavaA调用我们封装后的接口与之通信，等待外部程序结束，从而与 Runtime.getRuntime().exec(cmd) 的语义保持一致。这个单独运行的JavaB只需要很小很小的内存，因此不太可能出现无法分配内存，进而无法执行外部程序的问题了。
-      
-      
-    
+    - Java中Runtime.getRuntime().exec()错误：Cannot allocate memory
+      - 此bug是由于在JDK1.6以前版本，Runtime.exec调用外部程序时使用fork()方式，需要分配和当前Java主进程同等大小的内存空间，也就是说将当前占用内存加倍。因此当Java程序占用内存超过50%时执行Runtime.exec永远不能成功。
+        解决方法：
+        1、新起一个Java进程，通过socket与主进程通信。这样运行Runtime.exec时只会将新进程内存加倍。
+        2、坐等JDK1.7发布。该bug在JDK1.7中被Fix。
+    - 执行Runtime.exec异常: error=12,Cannot allocate memory:<http://blog.csdn.net/chifengxin/article/details/6573134>
+      - Description
+        If you run a "small" program (e.g., a Perl script) from a "big" Java process on
+        a machine with "moderate" free swap space (but not as much as the big Java
+        process), then Runtime.exec() fails.
+      - Cause Detail:
+        This issue dues to the operating mechanism of “Runtime.exec” in Java.
+        In Java program, “ProcessBuilder.start” and “Runtime.exec” use fork() on *NIX system, which allocates the child process the same amount of memory as the parent process. This will double the used memory for a short time. So when the Java main process has used over 50% memory, it will absolutely never launch a child process using “Runtime.exec” successful, even the process needs almost no memory.  
+      - There are three workable solutions:
+        1. The middleware of Tanuki may solve this problem. The question is, it is complicated and also expensive.
+            See-  http://wrapper.tanukisoftware.com/doc/english/child-exec.html
+        2. Separate the process using “Runtime.exec” from the main process into a new java process. So when the “Runtime.exec” is called ,it will only double the memory of the new process, using almost no memory.
+        which means:
+            a. When start/stop the main process, the “Runtime.exec” process should be started/stopped at the same time.
+            b. Add an independent socket in the main process to communicate with the new process. The exec command will be delivered to the new process to execute.
+        This will surely increase the complexity and maintenance of the system.
+        3. Update JDK1.6 to JDK1.7
+        This bug is fixed in JDK1.7 ,using new invoking mechanism of external program.
+        (Pipes be tested in JDK snapshot release: build 1.7.0-b147,passed with no exceptions; it also reduced the memory usage for about 20%)
+        This will need no modification for current source code.
+      - Use posix_spawn, not fork, on S10 to avoid swap exhaustion
+        - 在main函数中调用该函数可以将一个可执行文件运行起来
+        - <http://www.embedu.org/Column/8020.html>
+        <pre>
+        根据posix_spawn函数原型和功能可知，针对fork函数创建子进程时复制的主要三个方面有如下的方法替代：
+        
+        1. 复制文件描述符表：posix_spawn函数自身在创建子进程时也复制父进程所有的文件描述符，父子进程的文件描述符表指向同一个文件结构，这个和fork函数一样；
+        
+        2. 复制数据段：posix_spawn函数可以通过第五个参数指针数组argv[ ]进行数据传递，对于对父进程的代码段的复制只能通过再次编写来解决；
+        
+        3. 复制坏境变量：posix_spawn函数可以使用第六个参数数指针数组envp[ ]来传递父进程的环境参数，并且可以认为设置envp[ ]参数来设置子进程的环境参数。
+        
+        注：因为在SylixOS父子进程因为是共享同一张页表的，所以对于SylixOS操作系统的父子进程天生就有共享内存（即共享同一张页表地址），不过需要注意如果父子进程通过使用同一张页表同一个地址来传递数据很危险，需谨慎使用（比如子进程到共享页表地址进行读写操作，不小心踩到父进程的堆栈空间会造成不可估量的危险）。
+        </pre>
+        - 父子进程因为是共享同一张页表
+      - fork vs. posix_spawn Sun:<http://blog.csdn.net/maimang1001/article/details/29625153>  
+      - <http://www.man7.org/linux/man-pages/man3/posix_spawn.3.html>
+        - The posix_spawn() and posix_spawnp() functions are used to create a
+               new child process that executes a specified file.  These functions
+               were specified by POSIX to provide a standardized method of creating
+               new processes on machines that lack the capability to support the
+               fork(2) system call.  These machines are generally small, embedded
+               systems lacking MMU support.
+        
+        - The posix_spawn() and posix_spawnp() functions provide the
+               functionality of a combined fork(2) and exec(3), with some optional
+               housekeeping steps in the child process before the exec(3).  These
+               functions are not meant to replace the fork(2) and execve(2) system
+               calls.  In fact, they provide only a subset of the functionality that
+               can be achieved by using the system calls.
 
 
 ### 9.进程关系
