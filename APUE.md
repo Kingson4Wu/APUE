@@ -442,6 +442,7 @@ init时所有孤儿进程的父进程！！！
                functions are not meant to replace the fork(2) and execve(2) system
                calls.  In fact, they provide only a subset of the functionality that
                can be achieved by using the system calls.
+    - http://hg.openjdk.java.net/jdk8u/jdk8u60/jdk/file/935758609767/src/solaris/native/java/lang/UNIXProcess_md.c           
 
 
 ### 9.进程关系
@@ -632,15 +633,65 @@ UNIX域套接字仅仅复制数据，不执行协议处理，添加网络包头�
     
 
 
+---
+
+### 轻量级进程
++ <http://blog.csdn.net/handsomehong/article/details/73928873>
++ 一直以来, linux内核并没有线程的概念. 每一个执行实体都是一个task_struct结构, 通常称之为进程. 如图2.
++ 进程是一个执行单元, 维护着执行相关的动态资源. 同时, 它又引用着程序所需的静态资源.
+通过系统调用clone创建子进程时, 可以有选择性地让子进程共享父进程所引用的资源. 这样的子进程通常称为轻量级进程. 
++ linux上的线程就是基于轻量级进程, 由用户态的pthread库实现的.
+使用pthread以后, 在用户看来, 每一个task_struct就对应一个线程, 而一组线程以及它们所共同引用的一组资源就是一个进程.
++  一组线程并不仅仅是引用同一组资源就够了, 它们还必须被视为一个整体.
+  对此, POSIX标准提出了如下要求:
+  1, 查看进程列表的时候, 相关的一组task_struct应当被展现为列表中的一个节点;
+  2, 发送给这个"进程"的信号(对应kill系统调用), 将被对应的这一组task_struct所共享, 并且被其中的任意一个"线程"处理;
+  3, 发送给某个"线程"的信号(对应pthread_kill), 将只被对应的一个task_struct接收, 并且由它自己来处理;
+  4, 当"进程"被停止或继续时(对应SIGSTOP/SIGCONT信号), 对应的这一组task_struct状态将改变;
+  5, 当"进程"收到一个致命信号(比如由于段错误收到SIGSEGV信号), 对应的这一组task_struct将全部退出;
+  6, 等等(以上可能不够全);
+          
+#### linux threads
++  在linux 2.6以前, pthread线程库对应的实现是一个名叫linuxthreads的lib. 
+     linuxthreads利用前面提到的轻量级进程来实现线程, 但是对于POSIX提出的那些要求, linuxthreads除了第5点以外, 都没有实现(实际上是无能为力):
+     1, 如果运行了A程序, A程序创建了10个线程, 那么在shell下执行ps命令时将看到11个A进程, 而不是1个(注意, 也不是10个, 下面会解释);
+     2, 不管是kill还是pthread_kill, 信号只能被一个对应的线程所接收;
+     3, SIGSTOP/SIGCONT信号只对一个线程起作用;          
++ 线程的创建与销毁都是通过管理线程来完成的, 于是管理线程就成了linuxthreads的一个性能瓶颈. 
+  创建与销毁需要一次进程间通信, 一次上下文切换之后才能被管理线程执行, 并且多个请求会被管理线程串行地执行.
+      
+#### NPTL
++ 到了linux 2.6, glibc中有了一种新的pthread线程库--NPTL(Native POSIX Threading Library). 
+  NPTL实现了前面提到的POSIX的全部5点要求. 但是, 实际上, 与其说是NPTL实现了, 不如说是linux内核实现了.
++ 在linux 2.6中, 内核有了线程组的概念, task_struct结构中增加了一个tgid(thread group id)字段. 
+  如果这个task是一个"主线程", 则它的tgid等于pid, 否则tgid等于进程的pid(即主线程的pid).
+  在clone系统调用中, 传递CLONE_THREAD参数就可以把新进程的tgid设置为父进程的tgid(否则新进程的tgid会设为其自身的pid).
+  类似的XXid在task_struct中还有两个：task->signal->pgid保存进程组的打头进程的pid、task->signal->session保存会话打头进程的pid。通过这两个id来关联进程组和会话。
+
+#### NGPT
+
++ 说到这里, 也顺便提一下NGPT(Next Generation POSIX Threads). 
+上面提到的两种线程库使用的都是内核级线程(每个线程都对应内核中的一个调度实体), 这种模型称为1:1模型(1个线程对应1个内核级线程);
+而NGPT则打算实现M:N模型(M个线程对应N个内核级线程), 也就是说若干个线程可能是在同一个执行实体上实现的. 
+线程库需要在一个内核提供的执行实体上抽象出若干个执行实体, 并实现它们之间的调度. 这样被抽象出来的执行实体称为用户级线程.
+大体上, 这可以通过为每个用户级线程分配一个栈, 然后通过longjmp的方式进行上下文切换. (百度一下"setjmp/longjmp", 你就知道.)
+但是实际上要处理的细节问题非常之多. 
+目前的NGPT好像并没有实现所有预期的功能, 并且暂时也不准备去实现.        
         
-        
-    
-    
-        
++ 用户级线程的切换显然要比内核级线程的切换快一些, 前者可能只是一个简单的长跳转, 而后者则需要保存/装载寄存器, 进入然后退出内核态. (进程切换则还需要切换地址空间等.)
+  而用户级线程则不能享受多处理器, 因为多个用户级线程对应到一个内核级线程上, 一个内核级线程在同一时刻只能运行在一个处理器上.
+  不过, M:N的线程模型毕竟提供了这样一种手段, 可以让不需要并行执行的线程运行在一个内核级线程对应的若干个用户级线程上, 可以节省它们的切换开销.
+  
++  !!! 用户级线程就是绿色线程，协程？？！！！
+  
 
+---
++ <https://www.cnblogs.com/qquan/p/4321666.html>
++ 进程是资源管理的最小单位，线程是程序执行的最小单位。在操作系统设计上，从进程演化出线程，最主要的目的就是更好的支持SMP以及减小（进程/线程）上下文切换开销。
++ 针对线程模型的两大意义，分别开发出了核心级线程和用户级线程两种线程模型，分类的标准主要是线程的调度者在核内还是在核外。前者更利于并发使用多处理器的资源，而后者则更多考虑的是上下文切换开销。
 
-
-
++ linux线程的实现
+: <https://www.cnblogs.com/zhaoyl/p/3620204.html>
     
     
 
