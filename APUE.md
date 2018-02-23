@@ -398,6 +398,12 @@ init时所有孤儿进程的父进程！！！
       用fork()后，Java进程里的其它线程往往会被调度回来继续执行，修改了自己的内存，而这个时候
       execvp()还没有执行，于是悲剧就发生了，内存都要重新复制一遍。
       
+      (在内核侧，在进行了内存“复制”后，子进程与父进程指向同一个只读的Page分页。当子进程或者父进程发送修改内存请求后，由于是分页是只读的，OS此时才将内存进行复制为两份，并将这两份内存设置为可写权限，最后再处理刚刚发送的修改内存请求。)
+      (COW技术：
+       Linux的fork()使用写时复制技术，父子进程用的是相同的物理空间（内存区），子进程的代码段、数据段、堆栈都是指向父进程的物理空间(也就是说，两者的虚拟空间不同，但其对应的物理空间相同)。
+       fork()的实际开销就是复制父进程的页表以及给子进程创建惟一的进程描述符。
+       当父子任一进程试图修改数据段、堆栈，才会为修改的区域(通常为虚存中一页)制作副本。)
+      
       参考：
       
       http://my.oschina.net/jsan/blog/273672
@@ -459,7 +465,11 @@ init时所有孤儿进程的父进程！！！
                calls.  In fact, they provide only a subset of the functionality that
                can be achieved by using the system calls.
     - http://hg.openjdk.java.net/jdk8u/jdk8u60/jdk/file/935758609767/src/solaris/native/java/lang/UNIXProcess_md.c           
-
+    - posix_spawn is the way to go (vfork is removed in modern POSIX standard,
+      so it should be avoided when possible).
+    - There is one reason to not use vfork. It's when the child needs to dup a
+      FUSE-backed file descriptor, which could block, and in the case of vfork,
+      also block the parent for indefinite amount of time.  
 
 ### 9.进程关系
 + 终端登录
