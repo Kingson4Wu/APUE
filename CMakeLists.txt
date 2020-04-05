@@ -238,4 +238,7 @@ set(SOURCE_FILES
     apue.3e/threads/threadid.c
     apue.3e/threads/timedlock.c)
 
-add_executable(APUE ${SOURCE_FILES})
+#add_executable(APUE ${SOURCE_FILES})
+
+add_executable(APUE apue.3e/intro/hello.c)
+# 使 CLion 编译&运行单个 C/C++ 代码文件:<https://www.colabug.com/2018/0409/2651212/> , 点击 reload changes
