@@ -590,7 +590,7 @@ init时所有孤儿进程的父进程！！！
 
 ### 15.进程间通信
 + InterProcess Communication, IPC
-+ 管道、FIFO、消息队列、信号量、共享存储
++ 管道（Pipe）、命名管道（FIFO）、信号（Signal）、消息（Message）队列、信号量（semaphore）、共享存储、内存映射（mapped memory）、socket(域套接字)
 + 管道
     - 半双工
     - 只能在具有公共祖先的两个进程之间使用。
